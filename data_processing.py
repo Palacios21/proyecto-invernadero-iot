@@ -41,6 +41,39 @@ def find_time_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def parse_numeric_series(values: pd.Series) -> pd.Series:
+    """Convierte números exportados por Grafana aunque incluyan unidades."""
+    def parse_value(value):
+        if pd.isna(value):
+            return float("nan")
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        text = str(value).strip().replace("\\u00a0", "").replace(" ", "")
+        # Quitar unidades que Grafana puede incluir en el CSV.
+        text = re.sub(
+            r"(?i)(?:°\\s*[cf]|celsius|fahrenheit|lux|%)$",
+            "",
+            text,
+        )
+
+        # Admitir coma decimal o formatos con separadores de miles.
+        if "," in text and "." in text:
+            if text.rfind(",") > text.rfind("."):
+                text = text.replace(".", "").replace(",", ".")
+            else:
+                text = text.replace(",", "")
+        elif "," in text:
+            text = text.replace(",", ".")
+
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    return pd.to_numeric(values.map(parse_value), errors="coerce")
+
+
 def normalize_one(uploaded_file) -> pd.DataFrame:
     """Normaliza un CSV ancho, largo de InfluxDB o Time/Value de Grafana."""
     raw = pd.read_csv(uploaded_file)
@@ -60,7 +93,7 @@ def normalize_one(uploaded_file) -> pd.DataFrame:
     if field_col and value_col:
         work = raw[[time_col, field_col, value_col]].copy()
         work[time_col] = pd.to_datetime(work[time_col], errors="coerce", utc=True)
-        work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+        work[value_col] = parse_numeric_series(work[value_col])
         work["canonical_field"] = work[field_col].map(canonical_field)
         work = work.dropna(subset=[time_col, value_col, "canonical_field"])
         if work.empty:
@@ -88,7 +121,7 @@ def normalize_one(uploaded_file) -> pd.DataFrame:
         elif any(token in stem for token in ("iluminacion", "illumination", "light", "ldr", "lux")):
             target = "illumination_lux"
         if target:
-            frame[target] = pd.to_numeric(frame[value_col], errors="coerce")
+            frame[target] = parse_numeric_series(frame[value_col])
 
     # Formato ancho: Time + columnas con nombres reales/alias.
     rename: dict[str, str] = {}
@@ -104,7 +137,7 @@ def normalize_one(uploaded_file) -> pd.DataFrame:
     frame = frame[keep]
     for col in keep:
         if col != "timestamp":
-            frame[col] = pd.to_numeric(frame[col], errors="coerce")
+            frame[col] = parse_numeric_series(frame[col])
     return frame.dropna(subset=["timestamp"])
 
 
@@ -122,5 +155,5 @@ def load_files(files: Iterable) -> pd.DataFrame:
     result.columns.name = None
     for col in ALIASES:
         if col in result.columns:
-            result[col] = pd.to_numeric(result[col], errors="coerce")
+            result[col] = parse_numeric_series(result[col])
     return result.dropna(subset=["timestamp"])
