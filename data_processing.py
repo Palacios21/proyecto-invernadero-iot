@@ -49,10 +49,10 @@ def parse_numeric_series(values: pd.Series) -> pd.Series:
         if isinstance(value, (int, float)):
             return float(value)
 
-        text = str(value).strip().replace("\\u00a0", "").replace(" ", "")
+        text = str(value).strip().replace("\u00a0", "").replace(" ", "")
         # Quitar unidades que Grafana puede incluir en el CSV.
         text = re.sub(
-            r"(?i)(?:°\\s*[cf]|celsius|fahrenheit|lux|%)$",
+            r"(?i)(?:°\s*[cf]|celsius|fahrenheit|lux|%)$",
             "",
             text,
         )
